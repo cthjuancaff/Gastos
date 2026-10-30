@@ -1,4 +1,10 @@
-<!DOCTYPE html>
+<div cla'text-slate-800'}">${formatCurrency(item.total)}</span>
+                            </div>
+                            <button onclick="deleteHistoryItem('${item.id}')" class="text-slate-400 hover:text-red-600 p-2 transition" title="Eliminar del historial">
+                                <i class="fa-solid fa-trash-can"></i>
+                            </button>
+                        </div>
+                    </div><!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -26,6 +32,12 @@
                 <p class="text-indigo-100 text-sm mt-1">Presupuesto total: <span class="font-semibold text-white">1.000,00 €</span></p>
             </div>
             <div class="flex flex-wrap gap-2">
+                <button onclick="exportData()" class="bg-indigo-500 hover:bg-indigo-400 text-white text-xs px-3 py-2 rounded-xl transition font-medium flex items-center gap-1.5 shadow-sm" title="Guardar copia de seguridad">
+                    <i class="fa-solid fa-download"></i> Copia
+                </button>
+                <button onclick="importData()" class="bg-indigo-500 hover:bg-indigo-400 text-white text-xs px-3 py-2 rounded-xl transition font-medium flex items-center gap-1.5 shadow-sm" title="Cargar copia de seguridad">
+                    <i class="fa-solid fa-upload"></i> Cargar
+                </button>
                 <button onclick="closeCurrentMonth()" class="bg-emerald-500 hover:bg-emerald-600 text-white text-sm px-4 py-2 rounded-xl transition font-medium flex items-center gap-2 shadow-sm">
                     <i class="fa-solid fa-calendar-check"></i> Cerrar Mes
                 </button>
@@ -225,6 +237,9 @@
         <span id="toastMessage">Operación realizada con éxito</span>
     </div>
 
+    <!-- Hidden Input for Importing Backup -->
+    <input type="file" id="importFileInput" accept=".json" class="hidden" onchange="handleFileImport(event)">
+
     <!-- JavaScript Application Logic -->
     <script>
         // Constants & State
@@ -240,23 +255,116 @@
             history: []
         };
 
-        // Load data on start
-        window.onload = function() {
+        // Fallback Storage strategy using IndexedDB for iframe persistence
+        const DB_NAME = 'ExpensesTrackerDB';
+        const STORE_NAME = 'app_state';
+
+        function openDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, 1);
+                request.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        db.createObjectStore(STORE_NAME);
+                    }
+                };
+                request.onsuccess = (e) => resolve(e.target.result);
+                request.onerror = (e) => reject(e.target.error);
+            });
+        }
+
+        async function saveState() {
+            // Save to localStorage as secondary
+            try {
+                localStorage.setItem('monthly_expenses_state', JSON.stringify(state));
+            } catch(e){}
+
+            // Save to IndexedDB as primary (persists in iframes/Google Sites)
+            try {
+                const db = await openDB();
+                const tx = db.transaction(STORE_NAME, 'readwrite');
+                tx.objectStore(STORE_NAME).put(state, 'current');
+            } catch(e) {
+                console.error("IndexedDB save error", e);
+            }
+        }
+
+        async function loadState() {
+            // Try loading from IndexedDB first
+            try {
+                const db = await openDB();
+                const tx = db.transaction(STORE_NAME, 'readonly');
+                const req = tx.objectStore(STORE_NAME).get('current');
+                req.onsuccess = () => {
+                    if (req.result) {
+                        state = req.result;
+                        if (!state.history) state.history = [];
+                        updateUI();
+                    } else {
+                        loadFromLocalStorage();
+                    }
+                };
+                req.onerror = () => loadFromLocalStorage();
+            } catch(e) {
+                loadFromLocalStorage();
+            }
+        }
+
+        function loadFromLocalStorage() {
             const savedState = localStorage.getItem('monthly_expenses_state');
             if (savedState) {
                 try {
                     state = JSON.parse(savedState);
                     if (!state.history) state.history = [];
-                } catch (e) {
-                    console.error("Error loading state", e);
-                }
+                } catch (e) {}
             }
             updateUI();
-        };
-
-        function saveState() {
-            localStorage.setItem('monthly_expenses_state', JSON.stringify(state));
         }
+
+        // Export data to a JSON backup file
+        function exportData() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state));
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", `copia_gastos_${new Date().toISOString().slice(0,10)}.json`);
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+            showToast("Copia de seguridad descargada");
+        }
+
+        function importData() {
+            document.getElementById('importFileInput').click();
+        }
+
+        function handleFileImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const importedState = JSON.parse(e.target.result);
+                    if (importedState && (importedState.fijos || importedState.ocio)) {
+                        state = importedState;
+                        if (!state.history) state.history = [];
+                        saveState();
+                        updateUI();
+                        showToast("Datos restaurados con éxito");
+                    } else {
+                        showToast("El archivo no es válido", "warning");
+                    }
+                } catch (err) {
+                    showToast("Error al leer el archivo", "warning");
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // Load data on start
+        window.onload = function() {
+            loadState();
+        };
 
         function showToast(message, type = 'success') {
             const toast = document.getElementById('toast');
@@ -466,19 +574,12 @@
                                 <span>Ocio/Extras: <strong class="text-amber-600">${formatCurrency(item.ocioTotal)}</strong> (${item.ocioCount})</span>
                             </div>
                         </div>
-                        <div class="flex items-center justify-between sm:justify-end gap-4 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-200">
-                            <div class="text-left sm:text-right">
-                                <span class="text-xs text-slate-400 block">Total Gastado</span>
-                                <span class="font-bold text-base ${item.total > 1000 ? 'text-red-600' : 'text-slate-800'}">${formatCurrency(item.total)}</span>
-                            </div>
-                            <button onclick="deleteHistoryItem('${item.id}')" class="text-slate-400 hover:text-red-600 p-2 transition" title="Eliminar del historial">
-                                <i class="fa-solid fa-trash-can"></i>
-                            </button>
-                        </div>
-                    </div>
                 `).join('');
             }
         }
     </script>
 </body>
-</html>
+</html>ss="flex items-center justify-between sm:justify-end gap-4 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-200">
+                            <div class="text-left sm:text-right">
+                                <span class="text-xs text-slate-400 block">Total Gastado</span>
+                                <span class="font-bold text-base ${item.total > 1000 ? 'text-red-600' :
