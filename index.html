@@ -1,10 +1,4 @@
-<div cla'text-slate-800'}">${formatCurrency(item.total)}</span>
-                            </div>
-                            <button onclick="deleteHistoryItem('${item.id}')" class="text-slate-400 hover:text-red-600 p-2 transition" title="Eliminar del historial">
-                                <i class="fa-solid fa-trash-can"></i>
-                            </button>
-                        </div>
-                    </div><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -215,6 +209,7 @@
                     </div>
                 </div>
             </div>
+        </div>
 
         <!-- Monthly History Section -->
         <section class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
@@ -451,13 +446,6 @@
             showToast(`Mes de ${periodLabel} guardado en el historial`);
         }
 
-        function deleteHistoryItem(id) {
-            state.history = state.history.filter(item => item.id !== id);
-            saveState();
-            updateUI();
-            showToast("Registro borrado del historial", "warning");
-        }
-
         function formatCurrency(amount) {
             return amount.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
         }
@@ -574,12 +562,14 @@
                                 <span>Ocio/Extras: <strong class="text-amber-600">${formatCurrency(item.ocioTotal)}</strong> (${item.ocioCount})</span>
                             </div>
                         </div>
+                        <div class="text-left sm:text-right border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-200">
+                            <span class="text-xs text-slate-400 block">Total Gastado</span>
+                            <span class="font-bold text-base ${item.total > 1000 ? 'text-red-600' : 'text-slate-800'}">${formatCurrency(item.total)}</span>
+                        </div>
+                    </div>
                 `).join('');
             }
         }
     </script>
 </body>
-</html>ss="flex items-center justify-between sm:justify-end gap-4 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-200">
-                            <div class="text-left sm:text-right">
-                                <span class="text-xs text-slate-400 block">Total Gastado</span>
-                                <span class="font-bold text-base ${item.total > 1000 ? 'text-red-600' :
+</html>
