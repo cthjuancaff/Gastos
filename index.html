@@ -247,4 +247,320 @@
 
         // Constants & State
         const LIMITS = { fijos: 600, ocio: 400, total: 1000 };
-<!-- ... existing code -->
+        let appState = { fijos: [], ocio: [], history: [] };
+
+        // Helper: Format Currency
+        function formatCurrency(amount) {
+            return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount);
+        }
+
+        // Helper: Format Date
+        function formatDate(dateString) {
+            const options = { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' };
+            return new Date(dateString).toLocaleDateString('es-ES', options);
+        }
+
+        // Cargar datos de Google Sheets
+        async function loadData() {
+            if (!API_URL || API_URL.includes("TU_SCRIPT_ID")) return;
+            try {
+                const response = await fetch(API_URL);
+                if (response.ok) {
+                    const data = await response.json();
+                    appState.fijos = data.fijos || [];
+                    appState.ocio = data.ocio || [];
+                    render();
+                }
+            } catch (err) {
+                console.error("Error al cargar datos:", err);
+            }
+        }
+
+        // Add Expense Function (vía GET para evitar bloqueos CORS)
+        async function addExpense(event, category) {
+            event.preventDefault();
+            const nameInput = document.getElementById(`${category}Name`);
+            const amountInput = document.getElementById(`${category}Amount`);
+            
+            const name = nameInput.value.trim();
+            const amount = parseFloat(amountInput.value);
+
+            if (!name || isNaN(amount) || amount <= 0) {
+                showToast("Por favor introduce un nombre y cantidad válidos", "error");
+                return;
+            }
+
+            const newExpense = {
+                id: Date.now().toString(),
+                name,
+                amount,
+                date: new Date().toISOString()
+            };
+
+            // Guardar localmente
+            appState[category].push(newExpense);
+            render();
+
+            // Limpiar formulario
+            nameInput.value = '';
+            amountInput.value = '';
+
+            showToast("Gasto añadido correctamente");
+
+            // Guardar en Google Sheets (sincronización)
+            if (API_URL && !API_URL.includes("TU_SCRIPT_ID")) {
+                try {
+                    const url = `${API_URL}?action=add&id=${newExpense.id}&category=${category}&name=${encodeURIComponent(name)}&amount=${amount}&date=${encodeURIComponent(newExpense.date)}`;
+                    await fetch(url, { mode: 'no-cors' });
+                } catch (err) {
+                    console.error("Error al sincronizar con Google Sheets:", err);
+                }
+            }
+        }
+
+        // Delete Expense Function (vía GET)
+        async function deleteExpense(category, id) {
+            appState[category] = appState[category].filter(item => item.id.toString() !== id.toString());
+            render();
+            showToast("Gasto eliminado", "info");
+
+            if (API_URL && !API_URL.includes("TU_SCRIPT_ID")) {
+                try {
+                    const url = `${API_URL}?action=delete&id=${id}`;
+                    await fetch(url, { mode: 'no-cors' });
+                } catch (err) {
+                    console.error("Error al eliminar en Google Sheets:", err);
+                }
+            }
+        }
+
+        // Close Month / Reset
+        async function closeCurrentMonth() {
+            if (appState.fijos.length === 0 && appState.ocio.length === 0) {
+                showToast("No hay gastos registrados en este mes", "info");
+                return;
+            }
+
+            if (!confirm("¿Estás seguro de cerrar el mes? Se guardará el resumen en el historial y se reiniciará el saldo a 0.")) {
+                return;
+            }
+
+            const totalFijos = appState.fijos.reduce((sum, item) => sum + item.amount, 0);
+            const totalOcio = appState.ocio.reduce((sum, item) => sum + item.amount, 0);
+
+            const monthRecord = {
+                id: Date.now().toString(),
+                monthName: new Date().toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }),
+                dateClosed: new Date().toISOString(),
+                fijosSpent: totalFijos,
+                ocioSpent: totalOcio,
+                totalSpent: totalFijos + totalOcio,
+                fijosCount: appState.fijos.length,
+                ocioCount: appState.ocio.length
+            };
+
+            appState.history.unshift(monthRecord);
+            appState.fijos = [];
+            appState.ocio = [];
+
+            render();
+            showToast("Mes cerrado y guardado en el historial");
+
+            if (API_URL && !API_URL.includes("TU_SCRIPT_ID")) {
+                try {
+                    const url = `${API_URL}?action=clear`;
+                    await fetch(url, { mode: 'no-cors' });
+                } catch (err) {
+                    console.error("Error al limpiar Google Sheets:", err);
+                }
+            }
+        }
+
+        // Render Application Interface
+        function render() {
+            // Calculate totals
+            const fijosSpent = appState.fijos.reduce((sum, item) => sum + item.amount, 0);
+            const ocioSpent = appState.ocio.reduce((sum, item) => sum + item.amount, 0);
+            const totalSpent = fijosSpent + ocioSpent;
+
+            // Fijos
+            document.getElementById('fijosSpent').textContent = formatCurrency(fijosSpent);
+            const fijosRem = LIMITS.fijos - fijosSpent;
+            const fijosRemEl = document.getElementById('fijosRemaining');
+            fijosRemEl.textContent = formatCurrency(fijosRem);
+            fijosRemEl.className = fijosRem < 0 ? "text-lg font-bold text-rose-600" : "text-lg font-bold text-emerald-600";
+            
+            const fijosPct = Math.min(Math.round((fijosSpent / LIMITS.fijos) * 100), 100);
+            document.getElementById('fijosPercentage').textContent = `${fijosPct}%`;
+            document.getElementById('fijosProgressBar').style.width = `${fijosPct}%`;
+            document.getElementById('fijosCount').textContent = appState.fijos.length;
+
+            // Ocio
+            document.getElementById('ocioSpent').textContent = formatCurrency(ocioSpent);
+            const ocioRem = LIMITS.ocio - ocioSpent;
+            const ocioRemEl = document.getElementById('ocioRemaining');
+            ocioRemEl.textContent = formatCurrency(ocioRem);
+            ocioRemEl.className = ocioRem < 0 ? "text-lg font-bold text-rose-600" : "text-lg font-bold text-emerald-600";
+
+            const ocioPct = Math.min(Math.round((ocioSpent / LIMITS.ocio) * 100), 100);
+            document.getElementById('ocioPercentage').textContent = `${ocioPct}%`;
+            document.getElementById('ocioProgressBar').style.width = `${ocioPct}%`;
+            document.getElementById('ocioCount').textContent = appState.ocio.length;
+
+            // Global
+            document.getElementById('globalSpent').textContent = formatCurrency(totalSpent);
+            const globalRem = LIMITS.total - totalSpent;
+            const globalRemEl = document.getElementById('globalRemaining');
+            globalRemEl.textContent = formatCurrency(globalRem);
+            globalRemEl.className = globalRem < 0 ? "text-2xl font-bold text-rose-600 mt-1" : "text-2xl font-bold text-emerald-600 mt-1";
+
+            const globalPct = Math.min(Math.round((totalSpent / LIMITS.total) * 100), 100);
+            document.getElementById('globalPercentage').textContent = `${globalPct}%`;
+            document.getElementById('globalProgressBar').style.width = `${globalPct}%`;
+
+            // Render List: Fijos
+            const fijosList = document.getElementById('fijosList');
+            if (appState.fijos.length === 0) {
+                fijosList.innerHTML = '<p class="text-xs text-slate-400 text-center py-4 italic">No hay gastos fijos registrados</p>';
+            } else {
+                fijosList.innerHTML = appState.fijos.map(item => `
+                    <div class="flex items-center justify-between p-2.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-xs transition border border-slate-100">
+                        <div class="truncate pr-2">
+                            <span class="font-semibold text-slate-700 block truncate">${item.name}</span>
+                            <span class="text-[10px] text-slate-400">${formatDate(item.date)}</span>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
+                            <span class="font-bold text-slate-800">${formatCurrency(item.amount)}</span>
+                            <button onclick="deleteExpense('fijos', '${item.id}')" class="text-slate-400 hover:text-rose-600 p-1 rounded transition" title="Eliminar">
+                                <i class="fa-solid fa-trash-can"></i>
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+
+            // Render List: Ocio
+            const ocioList = document.getElementById('ocioList');
+            if (appState.ocio.length === 0) {
+                ocioList.innerHTML = '<p class="text-xs text-slate-400 text-center py-4 italic">No hay gastos de ocio registrados</p>';
+            } else {
+                ocioList.innerHTML = appState.ocio.map(item => `
+                    <div class="flex items-center justify-between p-2.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-xs transition border border-slate-100">
+                        <div class="truncate pr-2">
+                            <span class="font-semibold text-slate-700 block truncate">${item.name}</span>
+                            <span class="text-[10px] text-slate-400">${formatDate(item.date)}</span>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
+                            <span class="font-bold text-slate-800">${formatCurrency(item.amount)}</span>
+                            <button onclick="deleteExpense('ocio', '${item.id}')" class="text-slate-400 hover:text-rose-600 p-1 rounded transition" title="Eliminar">
+                                <i class="fa-solid fa-trash-can"></i>
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+
+            // Render History
+            document.getElementById('historyCount').textContent = `${appState.history.length} meses guardados`;
+            const historyList = document.getElementById('historyList');
+            if (appState.history.length === 0) {
+                historyList.innerHTML = '<p class="text-xs text-slate-400 text-center py-6 italic">No hay meses guardados en el historial aún. Pulsa "Cerrar Mes" cuando termines un periodo.</p>';
+            } else {
+                historyList.innerHTML = appState.history.map(item => `
+                    <div class="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                        <div>
+                            <h4 class="font-bold text-slate-800 capitalize text-sm">${item.monthName}</h4>
+                            <p class="text-xs text-slate-400">Cerrado el ${formatDate(item.dateClosed)}</p>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-4 text-xs">
+                            <div>
+                                <span class="text-slate-400 block text-[10px]">Fijos (${item.fijosCount})</span>
+                                <span class="font-semibold text-blue-600">${formatCurrency(item.fijosSpent)}</span>
+                            </div>
+                            <div>
+                                <span class="text-slate-400 block text-[10px]">Ocio (${item.ocioCount})</span>
+                                <span class="font-semibold text-amber-600">${formatCurrency(item.ocioSpent)}</span>
+                            </div>
+                            <div class="border-l border-slate-200 pl-4">
+                                <span class="text-slate-400 block text-[10px]">Total Gastado</span>
+                                <span class="font-bold text-indigo-600 text-sm">${formatCurrency(item.totalSpent)}</span>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        // Export Backup
+        function exportData() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(appState, null, 2));
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", `copia_gastos_${new Date().toISOString().slice(0,10)}.json`);
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+            showToast("Copia de seguridad descargada");
+        }
+
+        // Trigger Import
+        function importData() {
+            document.getElementById('importFileInput').click();
+        }
+
+        // Handle File Import
+        function handleFileImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const importedState = JSON.parse(e.target.result);
+                    if (importedState && Array.isArray(importedState.fijos) && Array.isArray(importedState.ocio)) {
+                        appState = importedState;
+                        render();
+                        showToast("Copia de seguridad cargada con éxito");
+                    } else {
+                        showToast("El archivo no tiene el formato correcto", "error");
+                    }
+                } catch (err) {
+                    showToast("Error al leer el archivo seleccionado", "error");
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // Custom Toast Notification
+        function showToast(message, type = "success") {
+            const toast = document.getElementById('toast');
+            const toastIcon = document.getElementById('toastIcon');
+            const toastMessage = document.getElementById('toastMessage');
+
+            toastMessage.textContent = message;
+
+            if (type === "error") {
+                toastIcon.className = "fa-solid fa-circle-xmark text-rose-400";
+            } else if (type === "info") {
+                toastIcon.className = "fa-solid fa-circle-info text-blue-400";
+            } else {
+                toastIcon.className = "fa-solid fa-circle-check text-emerald-400";
+            }
+
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+
+        // Initial Load on Page Startup
+        window.onload = function() {
+            render();
+            loadData();
+        };
+    </script>
+</body>
+</html>
