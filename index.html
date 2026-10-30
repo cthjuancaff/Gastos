@@ -4,6 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Control de Gastos Mensuales</title>
+    <!-- Configuración para PWA / App Instalable sin Internet -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Mis Gastos">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2953/2953361.png">
+    
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Font Inter -->
@@ -136,7 +143,6 @@
                             <span id="fijosCount" class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">0</span>
                         </h4>
                         <div id="fijosList" class="space-y-2 max-h-48 overflow-y-auto pr-1">
-                            <!-- Items inserted dynamically -->
                             <p class="text-xs text-slate-400 text-center py-4 italic">No hay gastos fijos registrados</p>
                         </div>
                     </div>
@@ -203,7 +209,6 @@
                             <span id="ocioCount" class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">0</span>
                         </h4>
                         <div id="ocioList" class="space-y-2 max-h-48 overflow-y-auto pr-1">
-                            <!-- Items inserted dynamically -->
                             <p class="text-xs text-slate-400 text-center py-4 italic">No hay gastos de ocio registrados</p>
                         </div>
                     </div>
@@ -237,20 +242,32 @@
 
     <!-- JavaScript Application Logic -->
     <script>
+        // Automatic Service Worker Registration for Offline Cache
+        if ('serviceWorker' in navigator) {
+            const swCode = `
+                const CACHE_NAME = 'gastos-offline-v1';
+                self.addEventListener('install', (e) => {
+                    e.waitUntil(
+                        caches.open(CACHE_NAME).then((cache) => {
+                            return cache.addAll(['./']);
+                        })
+                    );
+                });
+                self.addEventListener('fetch', (e) => {
+                    e.respondWith(
+                        caches.match(e.request).then((res) => res || fetch(e.request))
+                    );
+                });
+            `;
+            const blob = new Blob([swCode], { type: 'text/javascript' });
+            const swUrl = URL.createObjectURL(blob);
+            navigator.serviceWorker.register(swUrl).catch(() => {});
+        }
+
         // Constants & State
-        const LIMITS = {
-            fijos: 600,
-            ocio: 400,
-            total: 1000
-        };
+        const LIMITS = { fijos: 600, ocio: 400, total: 1000 };
+        let state = { fijos: [], ocio: [], history: [] };
 
-        let state = {
-            fijos: [],
-            ocio: [],
-            history: []
-        };
-
-        // Fallback Storage strategy using IndexedDB for iframe persistence
         const DB_NAME = 'ExpensesTrackerDB';
         const STORE_NAME = 'app_state';
 
@@ -269,23 +286,15 @@
         }
 
         async function saveState() {
-            // Save to localStorage as secondary
-            try {
-                localStorage.setItem('monthly_expenses_state', JSON.stringify(state));
-            } catch(e){}
-
-            // Save to IndexedDB as primary (persists in iframes/Google Sites)
+            try { localStorage.setItem('monthly_expenses_state', JSON.stringify(state)); } catch(e){}
             try {
                 const db = await openDB();
                 const tx = db.transaction(STORE_NAME, 'readwrite');
                 tx.objectStore(STORE_NAME).put(state, 'current');
-            } catch(e) {
-                console.error("IndexedDB save error", e);
-            }
+            } catch(e) {}
         }
 
         async function loadState() {
-            // Try loading from IndexedDB first
             try {
                 const db = await openDB();
                 const tx = db.transaction(STORE_NAME, 'readonly');
@@ -316,7 +325,6 @@
             updateUI();
         }
 
-        // Export data to a JSON backup file
         function exportData() {
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state));
             const downloadAnchor = document.createElement('a');
@@ -356,7 +364,6 @@
             reader.readAsText(file);
         }
 
-        // Load data on start
         window.onload = function() {
             loadState();
         };
@@ -451,7 +458,6 @@
         }
 
         function updateUI() {
-            // Calculate totals
             const fijosTotal = state.fijos.reduce((sum, item) => sum + item.amount, 0);
             const ocioTotal = state.ocio.reduce((sum, item) => sum + item.amount, 0);
             const globalTotal = fijosTotal + ocioTotal;
@@ -460,7 +466,6 @@
             const ocioRemainingVal = LIMITS.ocio - ocioTotal;
             const globalRemainingVal = LIMITS.total - globalTotal;
 
-            // Percentages
             const fijosPct = Math.min(Math.round((fijosTotal / LIMITS.fijos) * 100), 100);
             const ocioPct = Math.min(Math.round((ocioTotal / LIMITS.ocio) * 100), 100);
             const globalPct = Math.min(Math.round((globalTotal / LIMITS.total) * 100), 100);
