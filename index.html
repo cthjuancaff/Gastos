@@ -242,149 +242,68 @@
 
     <!-- JavaScript Application Logic -->
     <script>
-        // Automatic Service Worker Registration for Offline Cache
-        if ('serviceWorker' in navigator) {
-            const swCode = `
-                const CACHE_NAME = 'gastos-offline-v1';
-                self.addEventListener('install', (e) => {
-                    e.waitUntil(
-                        caches.open(CACHE_NAME).then((cache) => {
-                            return cache.addAll(['./']);
-                        })
-                    );
-                });
-                self.addEventListener('fetch', (e) => {
-                    e.respondWith(
-                        caches.match(e.request).then((res) => res || fetch(e.request))
-                    );
-                });
-            `;
-            const blob = new Blob([swCode], { type: 'text/javascript' });
-            const swUrl = URL.createObjectURL(blob);
-            navigator.serviceWorker.register(swUrl).catch(() => {});
-        }
+        // PEGA AQUÍ LA URL QUE TE DIO GOOGLE APPS SCRIPT:
+        const API_URL = "https://script.google.com/macros/s/AKfycbxCQuEBSd5PMJSkWj2cu9AS56b7FgDSVLAKEA2Xlc5etOBqWlWjPsoW9pX76XJbOyMTyA/exec";
 
         // Constants & State
         const LIMITS = { fijos: 600, ocio: 400, total: 1000 };
         let state = { fijos: [], ocio: [], history: [] };
 
-        const DB_NAME = 'ExpensesTrackerDB';
-        const STORE_NAME = 'app_state';
-
-        function openDB() {
-            return new Promise((resolve, reject) => {
-                const request = indexedDB.open(DB_NAME, 1);
-                request.onupgradeneeded = (e) => {
-                    const db = e.target.result;
-                    if (!db.objectStoreNames.contains(STORE_NAME)) {
-                        db.createObjectStore(STORE_NAME);
-                    }
-                };
-                request.onsuccess = (e) => resolve(e.target.result);
-                request.onerror = (e) => reject(e.target.error);
-            });
-        }
-
-        async function saveState() {
-            try { localStorage.setItem('monthly_expenses_state', JSON.stringify(state)); } catch(e){}
+        async function syncWithCloud() {
+            if (!API_URL || API_URL.includes("TU_SCRIPT_ID_AQUI")) return;
             try {
-                const db = await openDB();
-                const tx = db.transaction(STORE_NAME, 'readwrite');
-                tx.objectStore(STORE_NAME).put(state, 'current');
-            } catch(e) {}
-        }
-
-        async function loadState() {
-            try {
-                const db = await openDB();
-                const tx = db.transaction(STORE_NAME, 'readonly');
-                const req = tx.objectStore(STORE_NAME).get('current');
-                req.onsuccess = () => {
-                    if (req.result) {
-                        state = req.result;
-                        if (!state.history) state.history = [];
-                        updateUI();
-                    } else {
-                        loadFromLocalStorage();
-                    }
-                };
-                req.onerror = () => loadFromLocalStorage();
-            } catch(e) {
-                loadFromLocalStorage();
-            }
-        }
-
-        function loadFromLocalStorage() {
-            const savedState = localStorage.getItem('monthly_expenses_state');
-            if (savedState) {
-                try {
-                    state = JSON.parse(savedState);
-                    if (!state.history) state.history = [];
-                } catch (e) {}
-            }
-            updateUI();
-        }
-
-        function exportData() {
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state));
-            const downloadAnchor = document.createElement('a');
-            downloadAnchor.setAttribute("href", dataStr);
-            downloadAnchor.setAttribute("download", `copia_gastos_${new Date().toISOString().slice(0,10)}.json`);
-            document.body.appendChild(downloadAnchor);
-            downloadAnchor.click();
-            downloadAnchor.remove();
-            showToast("Copia de seguridad descargada");
-        }
-
-        function importData() {
-            document.getElementById('importFileInput').click();
-        }
-
-        function handleFileImport(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                try {
-                    const importedState = JSON.parse(e.target.result);
-                    if (importedState && (importedState.fijos || importedState.ocio)) {
-                        state = importedState;
-                        if (!state.history) state.history = [];
-                        saveState();
-                        updateUI();
-                        showToast("Datos restaurados con éxito");
-                    } else {
-                        showToast("El archivo no es válido", "warning");
-                    }
-                } catch (err) {
-                    showToast("Error al leer el archivo", "warning");
+                const res = await fetch(API_URL);
+                const cloudData = await res.json();
+                if (cloudData && (cloudData.fijos || cloudData.ocio)) {
+                    state.fijos = cloudData.fijos || [];
+                    state.ocio = cloudData.ocio || [];
+                    updateUI();
                 }
-            };
-            reader.readAsText(file);
+            } catch (e) {
+                console.error("Error al sincronizar:", e);
+            }
+        }
+
+        async function saveExpenseToCloud(category, expense) {
+            if (!API_URL || API_URL.includes("TU_SCRIPT_ID_AQUI")) return;
+            try {
+                await fetch(API_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'add', category, ...expense })
+                });
+            } catch(e){}
+        }
+
+        async function deleteExpenseFromCloud(id) {
+            if (!API_URL || API_URL.includes("TU_SCRIPT_ID_AQUI")) return;
+            try {
+                await fetch(API_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'delete', id })
+                });
+            } catch(e){}
+        }
+
+        async function clearMonthInCloud() {
+            if (!API_URL || API_URL.includes("TU_SCRIPT_ID_AQUI")) return;
+            try {
+                await fetch(API_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'clear' })
+                });
+            } catch(e){}
         }
 
         window.onload = function() {
-            loadState();
+            loadFromLocalStorage();
+            syncWithCloud();
         };
-
-        function showToast(message, type = 'success') {
-            const toast = document.getElementById('toast');
-            const toastMessage = document.getElementById('toastMessage');
-            const toastIcon = document.getElementById('toastIcon');
-
-            toastMessage.textContent = message;
-            if (type === 'success') {
-                toastIcon.className = 'fa-solid fa-circle-check text-emerald-400';
-            } else {
-                toastIcon.className = 'fa-solid fa-triangle-exclamation text-amber-400';
-            }
-
-            toast.classList.remove('translate-y-20', 'opacity-0');
-            setTimeout(() => {
-                toast.classList.add('translate-y-20', 'opacity-0');
-            }, 3000);
-        }
 
         function addExpense(event, category) {
             event.preventDefault();
@@ -404,7 +323,8 @@
             };
 
             state[category].push(newExpense);
-            saveState();
+            saveToLocalStorage();
+            saveExpenseToCloud(category, newExpense);
             updateUI();
 
             nameInput.value = '';
@@ -414,7 +334,8 @@
 
         function deleteExpense(category, id) {
             state[category] = state[category].filter(item => item.id !== id);
-            saveState();
+            saveToLocalStorage();
+            deleteExpenseFromCloud(id);
             updateUI();
             showToast("Gasto eliminado", "warning");
         }
@@ -448,9 +369,25 @@
             state.fijos = [];
             state.ocio = [];
 
-            saveState();
+            saveToLocalStorage();
+            clearMonthInCloud();
             updateUI();
             showToast(`Mes de ${periodLabel} guardado en el historial`);
+        }
+
+        function saveToLocalStorage() {
+            try { localStorage.setItem('monthly_expenses_state', JSON.stringify(state)); } catch(e){}
+        }
+
+        function loadFromLocalStorage() {
+            const savedState = localStorage.getItem('monthly_expenses_state');
+            if (savedState) {
+                try {
+                    state = JSON.parse(savedState);
+                    if (!state.history) state.history = [];
+                } catch (e) {}
+            }
+            updateUI();
         }
 
         function formatCurrency(amount) {
